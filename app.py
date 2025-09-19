@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Created on Fri Sep 19 12:16:23 2025
-FKTS Sales Monitor (Streamlit) — Python >= 3.9
+COMPANY Sales Monitor (Streamlit) — Python >= 3.9
 """
 
 import os, re, glob
@@ -13,12 +13,12 @@ from statsmodels.tsa.seasonal import STL
 import string, collections
 
 # Must be the first Streamlit command:
-st.set_page_config(page_title="FKTS Sales Monitor", layout="wide")
+st.set_page_config(page_title="Sales Monitor", layout="wide")
 
 # ---------- CONFIG ----------
 INPUT_FILES = [
-    r"C:\Users\LB945465\Desktop\FKTS\Daily Sales\2025 - FKTS Payment Monitoring updated.xlsm",
-    r"C:\Users\LB945465\Desktop\FKTS\Daily Sales\1.FKTS Inc. -  Payment Monitoring.xlsm",
+    r"C:\INSERT FILE",
+    r"C:\INSERT FILE",
 ]
 COLS = {
     "transaction_date": ["Transaction Date", "date"],
@@ -172,7 +172,7 @@ def load_workbooks(files):
 df = load_workbooks(INPUT_FILES)
 
 # ---------- UI ----------
-st.title("FKTS Sales Monitor")
+st.title("COMPANY Sales Monitor")
 
 if df.empty:
     st.error("No data loaded. Check your INPUT_FILES paths.")
@@ -348,3 +348,4 @@ with st.expander("STL Decomposition (monthly totals)", expanded=False):
         #st.line_chart(comp.set_index("date")[["Residual"]])
     else:
         st.info("Not enough monthly data after filters.")
+
