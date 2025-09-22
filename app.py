@@ -14,16 +14,23 @@ import string, collections
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 from io import BytesIO
-
+import requests
 
 # Must be the first Streamlit command:
 st.set_page_config(page_title="FKTS Sales Monitor", layout="wide")
 
 # ---------- CONFIG ----------
-INPUT_FILES = [
-    r"C:\Users\LB945465\Desktop\FKTS\Daily Sales\2025 - FKTS Payment Monitoring updated.xlsm",
-    r"C:\Users\LB945465\Desktop\FKTS\Daily Sales\1.FKTS Inc. -  Payment Monitoring.xlsm",
-]
+# --- Google Drive public CSV/Excel files (anyone-with-link) ---
+FILES = {
+    "Dataset A": "1Q3dUhLpsJ9fjeAzwzSYrCJ6ZNPYvH2rl",
+    "Dataset B": "1uVpM0NVoChXgCTRZqHsy2GS3hNDWs3oR",
+}
+
+# INPUT_FILES = [
+#     r"C:\Users\LB945465\Desktop\FKTS\Daily Sales\2025 - FKTS Payment Monitoring updated.xlsm",
+#     r"C:\Users\LB945465\Desktop\FKTS\Daily Sales\1.FKTS Inc. -  Payment Monitoring.xlsm",
+# ]
+
 COLS = {
     "transaction_date": ["Transaction Date", "date"],
     "company":          ["Company Name", "client/company", "company", "client"],
@@ -194,27 +201,116 @@ def plot_yearly_tendency_stream(monthly_ts):
 
 
 # ---------- Data loading ----------
-@st.cache_data
-def load_workbooks(files):
+# @st.cache_data
+# def load_workbooks(files):
+#     frames = []
+#     for pat in files:
+#         for fpath in sorted(glob.glob(pat)):
+#             try:
+#                 book = pd.read_excel(fpath, sheet_name=None, engine="openpyxl", dtype=object, header=None)
+#             except Exception as e:
+#                 st.warning(f"Skip file {os.path.basename(fpath)}: {e}")
+#                 continue
+#             for sname, df in (book or {}).items():
+#                 if df is None or df.empty:
+#                     continue
+#                 data, _ = _find_header_and_rename(df)
+#                 if data is None:
+#                     continue
+#                 data["__sheet__"]  = str(sname)
+#                 data["__source__"] = os.path.basename(fpath)
+#                 frames.append(data)
+#     if not frames:
+#         return pd.DataFrame(columns=list(COLS.keys()))
+#     df = pd.concat(frames, ignore_index=True, sort=False)
+
+#     # clean
+#     df["transaction_date"] = df["transaction_date"].apply(_parse_date)
+#     df["amount"]           = df["amount"].apply(_clean_amount)
+#     df["company"]          = df["company"].apply(_tidy_company)
+#     df = df[df["company"].notna()]
+    
+#     # canonical key for uniqueness
+#     df["company_key"] = df["company"].apply(_company_key)
+    
+#     # optional: deduplicate receipts across sources (keeps first occurrence)
+#     DEDUP_KEYS = ["transaction_date", "receipt_no", "company_key", "amount"]
+#     if set(DEDUP_KEYS).issubset(df.columns):
+#         before = len(df)
+#         df = df.drop_duplicates(subset=DEDUP_KEYS, keep="first")
+#         # st.write(f"De-dup removed {before - len(df)} rows")  # optional debug
+
+#     # derived
+#     df["year"]  = df["transaction_date"].dt.year
+#     df["month"] = df["transaction_date"].dt.month
+#     df["month_key"] = df["transaction_date"].dt.strftime("%Y-%m")
+
+#     return df
+
+# # Load after page_config is set
+# df = load_workbooks(INPUT_FILES)
+
+# ---------- Data loading (Google Drive direct links) ----------
+def _gdrive_url(file_id: str) -> str:
+    return f"https://drive.google.com/uc?id={file_id}"
+
+@st.cache_data(ttl=600)
+def _download_bytes(file_id: str) -> bytes:
+    r = requests.get(_gdrive_url(file_id), timeout=30)
+    r.raise_for_status()
+    return r.content
+
+def _read_any_tablelike(content: bytes, source_name: str):
+    """
+    Try Excel workbook first (may contain many sheets), else CSV.
+    Return list of (sheet_name, DataFrame with header=None) for header detection.
+    """
+    out = []
+    bio = BytesIO(content)
+
+    # Try Excel (multi-sheet) first
+    try:
+        book = pd.read_excel(bio, sheet_name=None, engine="openpyxl", dtype=object, header=None)
+        for sname, df in (book or {}).items():
+            if df is not None and not df.empty:
+                out.append((str(sname), df))
+        if out:
+            return out
+    except Exception:
+        pass
+
+    # Fallback: CSV (treat first row as data so header detection still works)
+    try:
+        bio.seek(0)
+        df = pd.read_csv(bio, dtype=object, header=None)
+        if df is not None and not df.empty:
+            out.append(("csv", df))
+    except Exception:
+        pass
+
+    return out
+
+@st.cache_data(ttl=600)
+def load_drive_files(file_ids: dict) -> pd.DataFrame:
     frames = []
-    for pat in files:
-        for fpath in sorted(glob.glob(pat)):
-            try:
-                book = pd.read_excel(fpath, sheet_name=None, engine="openpyxl", dtype=object, header=None)
-            except Exception as e:
-                st.warning(f"Skip file {os.path.basename(fpath)}: {e}")
+    for label, fid in file_ids.items():
+        try:
+            content = _download_bytes(fid)
+        except Exception as e:
+            st.warning(f"Skip Drive file {label}: {e}")
+            continue
+
+        for sname, raw in _read_any_tablelike(content, label):
+            data, _hdr = _find_header_and_rename(raw)
+            if data is None or data.empty:
                 continue
-            for sname, df in (book or {}).items():
-                if df is None or df.empty:
-                    continue
-                data, _ = _find_header_and_rename(df)
-                if data is None:
-                    continue
-                data["__sheet__"]  = str(sname)
-                data["__source__"] = os.path.basename(fpath)
-                frames.append(data)
+            data["__sheet__"]  = sname
+            data["__source__"] = label
+            frames.append(data)
+
     if not frames:
         return pd.DataFrame(columns=list(COLS.keys()))
+
     df = pd.concat(frames, ignore_index=True, sort=False)
 
     # clean
@@ -222,26 +318,24 @@ def load_workbooks(files):
     df["amount"]           = df["amount"].apply(_clean_amount)
     df["company"]          = df["company"].apply(_tidy_company)
     df = df[df["company"].notna()]
-    
-    # canonical key for uniqueness
+
+    # canonical key
     df["company_key"] = df["company"].apply(_company_key)
-    
-    # optional: deduplicate receipts across sources (keeps first occurrence)
+
+    # de-dup (keeps first)
     DEDUP_KEYS = ["transaction_date", "receipt_no", "company_key", "amount"]
     if set(DEDUP_KEYS).issubset(df.columns):
-        before = len(df)
         df = df.drop_duplicates(subset=DEDUP_KEYS, keep="first")
-        # st.write(f"De-dup removed {before - len(df)} rows")  # optional debug
 
     # derived
-    df["year"]  = df["transaction_date"].dt.year
-    df["month"] = df["transaction_date"].dt.month
+    df["year"]      = df["transaction_date"].dt.year
+    df["month"]     = df["transaction_date"].dt.month
     df["month_key"] = df["transaction_date"].dt.strftime("%Y-%m")
-
     return df
 
-# Load after page_config is set
-df = load_workbooks(INPUT_FILES)
+# Load
+df = load_drive_files(FILES)
+
 
 # ---------- UI ----------
 st.title("FKTS Sales Monitor")
