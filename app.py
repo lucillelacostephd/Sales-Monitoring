@@ -4,18 +4,16 @@ Created on Fri Sep 19 12:16:23 2025
 FKTS Sales Monitor (Streamlit) — Python >= 3.9
 """
 
-import os, re, glob
+import re
 import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.express as px
-from statsmodels.tsa.seasonal import STL
-import string, collections
+import string
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 from io import BytesIO
 import requests
-from requests.exceptions import HTTPError, Timeout, RequestException
 
 # Must be the first Streamlit command:
 st.set_page_config(page_title="FKTS Sales Monitor", layout="wide")
@@ -360,7 +358,6 @@ else:
 
 # Linear trend for yearly totals
 if len(year_tot) >= 2:
-    import numpy as np
     m, b = np.polyfit(year_tot["year"], year_tot["year_total"], 1)
     xfit = np.linspace(year_tot["year"].min()-0.2, year_tot["year"].max()+0.2, 100)
     yfit = m*xfit + b
