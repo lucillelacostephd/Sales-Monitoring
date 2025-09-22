@@ -441,9 +441,9 @@ if d["transaction_date"].notna().any():
                           "value": [prev_ytd, cur_ytd, proj]})
     
     color_map = {
-    "Prev YTD": "#c6dbef",        
-    "Current YTD": "#6baed6",     
-    "Projection": "#2171b5"      
+        "Prev YTD": "#c6dbef",        
+        "Current YTD": "#6baed6",     
+        "Projection": "#2171b5"      
     }
     
     fig_g = px.bar(
@@ -453,11 +453,19 @@ if d["transaction_date"].notna().any():
         title="Run-rate Gauge",
         color_discrete_map=color_map
     )
-    fig_g.update_layout(showlegend=False)
+    # More height + smaller bargap = thicker bars
+    fig_g.update_layout(
+        showlegend=False,
+        height=400,          # taller figure => thicker bars
+        bargap=0.05,         # less space between bars => thicker bars
+        bargroupgap=0.0,
+        template="plotly_white"
+    )
     fig_g.update_xaxes(tickprefix="₱", separatethousands=True)
     st.plotly_chart(fig_g, use_container_width=True)
 
 st.divider()
+
 
 # ---------- Row 3: Monthly Total Sales (full width) ----------
 st.subheader("Monthly Total Sales")
