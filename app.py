@@ -10,13 +10,18 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 import string
-import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter
-from io import BytesIO
 import requests
+import io
+from requests.exceptions import HTTPError, Timeout, RequestException
+import plotly.io as pio
 
 # Must be the first Streamlit command:
 st.set_page_config(page_title="FKTS Sales Monitor", layout="wide")
+pio.templates.default = "plotly_white"
+px.defaults.template = "plotly_white"
+# color sequence used across charts
+COLOR_SEQ = px.colors.qualitative.Dark24  # 24 distinct colors
+px.defaults.color_discrete_sequence = COLOR_SEQ
 
 # ---------- CONFIG ----------
 # --- Google Drive public files (Anyone with link: Viewer) ---
@@ -41,9 +46,6 @@ ALIASES = {
     # "FRIGIDZONE MARIKINA": "FRIGIDZONE",
     # "FRIGIDZONE KAMIAS":   "FRIGIDZONE",
 }
-
-# color sequence used across charts
-COLOR_SEQ = px.colors.qualitative.Dark24  # 24 distinct colors
 
 # ---------- Header detection helpers ----------
 def _norm(s):
@@ -193,58 +195,65 @@ def plot_yearly_tendency_stream(monthly_ts):
     plt.tight_layout()
     return fig, year_tot.reset_index(drop=True), cagr, slope
 
-# ---------- Data loading (Google Drive direct links) ----------
+# ---------- Data loading (Google Drive: always load BOTH) ----------
 def _gdrive_url(file_id: str) -> str:
     return f"https://drive.google.com/uc?id={file_id}"
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=3600, show_spinner=False)
 def _download_bytes(file_id: str) -> bytes:
-    r = requests.get(_gdrive_url(file_id), timeout=30)
-    r.raise_for_status()
-    return r.content
+    url = _gdrive_url(file_id)
+    last_err = None
+    for _ in range(3):  # retry a few times
+        try:
+            r = requests.get(url, timeout=45, headers={"User-Agent": "fkts-streamlit"})
+            r.raise_for_status()
+            return r.content
+        except (HTTPError, Timeout, RequestException) as e:
+            last_err = e
+    raise RuntimeError(f"Drive fetch failed ({file_id}): {last_err}")
 
-def _read_any_tablelike(content: bytes, source_name: str):
+def _read_any_tablelike(content: bytes):
     """
-    Try Excel workbook first (may contain many sheets), else CSV.
-    Return list of (sheet_name, DataFrame with header=None) for header detection.
+    Try CSV first (fast), then Excel if needed.
+    Return list of (sheet_name, df_without_header).
     """
-    out = []
-    bio = BytesIO(content)
-
-    # Try Excel (multi-sheet) first
+    out, bio = [], io.BytesIO(content)
+    # CSV first
     try:
+        bio.seek(0)
+        df_csv = pd.read_csv(bio, dtype=object, header=None)
+        if not df_csv.empty:
+            out.append(("csv", df_csv))
+            return out
+    except Exception:
+        pass
+    # Excel fallback (multi-sheet)
+    try:
+        bio.seek(0)
         book = pd.read_excel(bio, sheet_name=None, engine="openpyxl", dtype=object, header=None)
         for sname, df in (book or {}).items():
             if df is not None and not df.empty:
                 out.append((str(sname), df))
-        if out:
-            return out
     except Exception:
         pass
-
-    # Fallback: CSV (treat first row as data so header detection still works)
-    try:
-        bio.seek(0)
-        df = pd.read_csv(bio, dtype=object, header=None)
-        if df is not None and not df.empty:
-            out.append(("csv", df))
-    except Exception:
-        pass
-
     return out
 
-@st.cache_data(ttl=600)
-def load_drive_files(file_ids: dict) -> pd.DataFrame:
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_both_drive_files(file_ids: dict, data_version: str = "v1") -> pd.DataFrame:
+    """
+    Load ALL files in file_ids, normalize columns/values, and concatenate.
+    data_version is a cache-buster you can bump when the Drive files change.
+    """
     frames = []
     for label, fid in file_ids.items():
         try:
             content = _download_bytes(fid)
         except Exception as e:
-            st.warning(f"Skip Drive file {label}: {e}")
+            st.warning(f"Skipping {label}: {e}")
             continue
 
-        for sname, raw in _read_any_tablelike(content, label):
-            data, _hdr = _find_header_and_rename(raw)
+        for sname, raw in _read_any_tablelike(content):
+            data, _hdr = _find_header_and_rename(raw)  # <- your existing header detector
             if data is None or data.empty:
                 continue
             data["__sheet__"]  = sname
@@ -256,35 +265,34 @@ def load_drive_files(file_ids: dict) -> pd.DataFrame:
 
     df = pd.concat(frames, ignore_index=True, sort=False)
 
-    # clean
+    # Clean & normalize (your existing helpers)
     df["transaction_date"] = df["transaction_date"].apply(_parse_date)
-    df["amount"]           = df["amount"].apply(_clean_amount)
+    df["amount"]           = df["amount"].apply(_clean_amount).astype("float64")
     df["company"]          = df["company"].apply(_tidy_company)
     df = df[df["company"].notna()]
 
-    # canonical key
+    # Canonical key + de-dup
     df["company_key"] = df["company"].apply(_company_key)
-
-    # de-dup (keeps first)
     DEDUP_KEYS = ["transaction_date", "receipt_no", "company_key", "amount"]
     if set(DEDUP_KEYS).issubset(df.columns):
         df = df.drop_duplicates(subset=DEDUP_KEYS, keep="first")
 
-    # derived
+    # Derived fields
     df["year"]      = df["transaction_date"].dt.year
-    df["month"]     = df["transaction_date"].dt.month
     df["month_key"] = df["transaction_date"].dt.strftime("%Y-%m")
+
+    # Sort for deterministic plots
+    df = df.sort_values(["transaction_date", "company_key"], kind="mergesort").reset_index(drop=True)
     return df
 
 # Load
-df = load_drive_files(FILES)
-
+df = load_both_drive_files(FILES)
 
 # ---------- UI ----------
 st.title("FKTS Sales Monitor")
 
 if df.empty:
-    st.error("No data loaded. Check your INPUT_FILES paths.")
+    st.error("No data loaded. Check Google Drive sharing (Anyone with link: Viewer) and file format.")
     st.stop()
 
 # Sidebar filters
