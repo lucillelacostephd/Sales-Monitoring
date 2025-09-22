@@ -15,15 +15,16 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 from io import BytesIO
 import requests
+from requests.exceptions import HTTPError, Timeout, RequestException
 
 # Must be the first Streamlit command:
 st.set_page_config(page_title="FKTS Sales Monitor", layout="wide")
 
 # ---------- CONFIG ----------
-# --- Google Drive public CSV/Excel files (anyone-with-link) ---
+# --- Google Drive public files (Anyone with link: Viewer) ---
 FILES = {
-    "Dataset A": "1Q3dUhLpsJ9fjeAzwzSYrCJ6ZNPYvH2rl",
-    "Dataset B": "1uVpM0NVoChXgCTRZqHsy2GS3hNDWs3oR",
+    "Dataset A": "1uVpM0NVoChXgCTRZqHsy2GS3hNDWs3oR",
+    "Dataset B": "1Q3dUhLpsJ9fjeAzwzSYrCJ6ZNPYvH2rl",
 }
 
 # INPUT_FILES = [
@@ -560,63 +561,40 @@ if "receipt_type" in d.columns and d["receipt_type"].notna().any():
     m = d.groupby(["month_key","receipt_type"])["amount"].sum().reset_index()
     m["month_dt"] = pd.to_datetime(m["month_key"])
     fig_mix_m = px.bar(
-        m.sort_values("month_dt"), x="month_dt", y="amount", color="receipt_type",
-        barmode="stack", title="Invoice-Type Mix by Month",
+        m.sort_values("month_dt"),
+        x="month_dt", y="amount", color="receipt_type",
+        title="Invoice-Type Mix by Month",
         color_discrete_sequence=COLOR_SEQ
     )
+    fig_mix_m.update_layout(barmode="stack")  # <— enforce
     fig_mix_m.update_yaxes(tickprefix="₱", separatethousands=True)
     st.plotly_chart(fig_mix_m, use_container_width=True)
-
+    
     # Yearly stacked (absolute)
     y = d.groupby(["year","receipt_type"])["amount"].sum().reset_index()
     fig_mix_y = px.bar(
-        y, x="year", y="amount", color="receipt_type", barmode="stack",
+        y, x="year", y="amount", color="receipt_type",
         title="Invoice-Type Mix by Year",
         color_discrete_sequence=COLOR_SEQ
     )
+    fig_mix_y.update_layout(barmode="stack")  # <— enforce
     fig_mix_y.update_yaxes(tickprefix="₱", separatethousands=True)
-
-    # Yearly normalized (100%) with % annotations
+    
+    # Yearly normalized (100%) with % annotations (keep your manual calc)
     y_norm = y.pivot(index="year", columns="receipt_type", values="amount").fillna(0.0)
-    y_share = (y_norm.div(y_norm.sum(axis=1).replace(0,np.nan), axis=0).fillna(0.0) * 100.0)
+    y_share = (y_norm.div(y_norm.sum(axis=1).replace(0, np.nan), axis=0).fillna(0.0) * 100.0)
     y_share_m = y_share.reset_index().melt(id_vars="year", var_name="receipt_type", value_name="pct")
     fig_norm = px.bar(
-        y_share_m, x="year", y="pct", color="receipt_type", barmode="stack",
+        y_share_m, x="year", y="pct", color="receipt_type",
         title="Invoice-Type Mix by Year (Normalized)",
         text="pct", color_discrete_sequence=COLOR_SEQ
     )
+    fig_norm.update_layout(barmode="stack")  # <— enforce
     fig_norm.update_traces(texttemplate="%{text:.1f}%", textposition="inside")
-    fig_norm.update_yaxes(range=[0,100], ticksuffix="%")
-
-    # --- Side-by-side columns for yearly stacked & normalized ---
+    fig_norm.update_yaxes(range=[0, 100], ticksuffix="%")
+    
     c1, c2 = st.columns(2)
     c1.plotly_chart(fig_mix_y, use_container_width=True)
     c2.plotly_chart(fig_norm, use_container_width=True)
 
 st.divider()
-
-
-# # ---------- Row 6: STL decomposition (computed on the fly for current filter) ----------
-# with st.expander("STL Decomposition (monthly totals)", expanded=False):
-#     ts2 = d.groupby("month_key")["amount"].sum().reset_index()
-#     ts2["month_dt"] = pd.to_datetime(ts2["month_key"], format="%Y-%m", errors="coerce")
-#     ts2 = ts2.dropna().sort_values("month_dt")
-#     if not ts2.empty:
-#         s = ts2.set_index("month_dt")["amount"].copy()
-#         s.index = s.index.to_period("M").to_timestamp("M")
-#         full_idx = pd.period_range(s.index.min().to_period("M"), s.index.max().to_period("M"), freq="M").to_timestamp("M")
-#         s = s.reindex(full_idx).fillna(0.0)
-#         res = STL(s, period=12, robust=True).fit()
-#         comp = pd.DataFrame({
-#             "date": s.index,
-#             "Observed": s.values,
-#             "Trend": res.trend,
-#             "Seasonal": res.seasonal,
-#             "Residual": res.resid
-#         })
-#         #st.line_chart(comp.set_index("date")[["Observed"]])
-#         st.line_chart(comp.set_index("date")[["Trend"]])
-#         #st.line_chart(comp.set_index("date")[["Seasonal"]])
-#         #st.line_chart(comp.set_index("date")[["Residual"]])
-#     else:
-#         st.info("Not enough monthly data after filters.")
