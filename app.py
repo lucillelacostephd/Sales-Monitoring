@@ -457,7 +457,7 @@ if d["transaction_date"].notna().any():
     fig_g.update_layout(
         showlegend=False,
         height=400,          # taller figure => thicker bars
-        bargap=0,         # less space between bars => thicker bars
+        bargap=0.02,         # less space between bars => thicker bars
         bargroupgap=0.0,
         template="plotly_white"
     )
