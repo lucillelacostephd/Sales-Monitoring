@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Created on Fri Sep 19 12:16:23 2025
-COMPANY Sales Monitor (Streamlit) — Python >= 3.9
+FKTS Sales Monitor (Streamlit) — Python >= 3.9
 """
 
 import os, re, glob
@@ -11,14 +11,18 @@ import streamlit as st
 import plotly.express as px
 from statsmodels.tsa.seasonal import STL
 import string, collections
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
+from io import BytesIO
+
 
 # Must be the first Streamlit command:
-st.set_page_config(page_title="Sales Monitor", layout="wide")
+st.set_page_config(page_title="FKTS Sales Monitor", layout="wide")
 
 # ---------- CONFIG ----------
 INPUT_FILES = [
-    r"C:\INSERT FILE",
-    r"C:\INSERT FILE",
+    r"C:\Users\LB945465\Desktop\FKTS\Daily Sales\2025 - FKTS Payment Monitoring updated.xlsm",
+    r"C:\Users\LB945465\Desktop\FKTS\Daily Sales\1.FKTS Inc. -  Payment Monitoring.xlsm",
 ]
 COLS = {
     "transaction_date": ["Transaction Date", "date"],
@@ -121,6 +125,74 @@ def _company_key(s: str):
     s = re.sub(r"\s+", " ", s).strip()
     return ALIASES.get(s, s) if s else np.nan
 
+# Peso formatter for Matplotlib axes
+def _peso_fmt(x, pos):
+    return "₱{:,.2f}".format(x)
+
+def plot_yearly_tendency_stream(monthly_ts):
+    """
+    monthly_ts: DataFrame with ['month_dt','monthly_total'] sorted.
+    Returns (fig, yearly_df, cagr, slope_per_year).
+    """
+    if monthly_ts is None or monthly_ts.empty:
+        return None, pd.DataFrame(), np.nan, np.nan
+
+    tmp = monthly_ts.copy()
+    tmp["year"] = tmp["month_dt"].dt.year
+
+    year_tot = (tmp.groupby("year", as_index=False)["monthly_total"]
+                  .sum().rename(columns={"monthly_total": "year_total"}))
+    # completeness
+    counts = tmp.groupby("year")["month_dt"].nunique().rename("n_months")
+    year_tot = year_tot.merge(counts, on="year", how="left").sort_values("year")
+    if year_tot.empty:
+        return None, pd.DataFrame(), np.nan, np.nan
+
+    # CAGR
+    first_val = float(year_tot["year_total"].iloc[0])
+    last_val  = float(year_tot["year_total"].iloc[-1])
+    n_years   = int(year_tot["year"].iloc[-1] - year_tot["year"].iloc[0])
+    cagr = (last_val / first_val) ** (1.0 / n_years) - 1.0 if (n_years > 0 and first_val > 0) else np.nan
+
+    # Trend (OLS on yearly totals)
+    years  = year_tot["year"].to_numpy(dtype=float)
+    totals = year_tot["year_total"].to_numpy(dtype=float)
+    slope = np.nan
+    xfit = yfit = None
+    if len(years) >= 2:
+        m, b = np.polyfit(years, totals, 1)
+        slope = m  # ₱/year
+        xfit = np.linspace(years.min()-0.2, years.max()+0.2, 100)
+        yfit = m * xfit + b
+
+    # Plot
+    fig, ax = plt.subplots(figsize=(12, 6))
+    bars = ax.bar(years, totals, width=0.6, color="#1f77b4")
+    ax.yaxis.set_major_formatter(FuncFormatter(_peso_fmt))
+    ax.set_xlabel("Year"); ax.set_ylabel("Total Sales (₱)")
+
+    title = "Yearly Total Sales"
+    if not np.isnan(cagr):
+        title += f" • Compound Annual Growth Rate: {cagr*100:,.1f}%"
+    ax.set_title(title)
+    ax.grid(axis="y", linestyle="--", alpha=0.35)
+
+    # annotate bars
+    for b in bars:
+        val = b.get_height()
+        ax.text(b.get_x() + b.get_width()/2, val, f"₱{val:,.0f}",
+                va="bottom", ha="center", fontsize=9)
+
+    # trend line + slope label
+    if xfit is not None:
+        ax.plot(xfit, yfit, linewidth=2.0, color="#f39c12")
+        ax.text(0.02, 0.95, f"Trend slope: ₱{slope:,.0f}/yr",
+                transform=ax.transAxes, ha="left", va="top", fontsize=10, color="#555555")
+
+    plt.tight_layout()
+    return fig, year_tot.reset_index(drop=True), cagr, slope
+
+
 # ---------- Data loading ----------
 @st.cache_data
 def load_workbooks(files):
@@ -172,7 +244,7 @@ def load_workbooks(files):
 df = load_workbooks(INPUT_FILES)
 
 # ---------- UI ----------
-st.title("COMPANY Sales Monitor")
+st.title("FKTS Sales Monitor")
 
 if df.empty:
     st.error("No data loaded. Check your INPUT_FILES paths.")
@@ -181,9 +253,11 @@ if df.empty:
 # Sidebar filters
 years = sorted(df["year"].dropna().unique().astype(int))
 rtype_opts = sorted([x for x in df.get("receipt_type", pd.Series()).dropna().unique()])
+
 with st.sidebar:
     st.header("Filters")
-    year_sel = st.multiselect("Years", years, default=years[-1:] if years else [])
+    # Default to all years instead of last year only
+    year_sel = st.multiselect("Years", years, default=years if years else [])
     rtype_sel = st.multiselect("Receipt Type", rtype_opts, default=rtype_opts)
     top_n = st.slider("Top-N companies", 5, 30, TOP_N_DEFAULT)
 
@@ -195,33 +269,72 @@ if rtype_sel and "receipt_type" in d:
     d = d[d["receipt_type"].isin(rtype_sel)]
 
 # ---------- KPIs ----------
-colk1, colk2, colk3 = st.columns(3)
-total_sum = d["amount"].sum()
-month_latest = d["transaction_date"].max()
-unique_companies = d["company_key"].nunique()
-colk1.metric("Total (filter)", f"₱{total_sum:,.0f}")
-colk2.metric("Last date", month_latest.strftime("%Y-%m-%d") if pd.notna(month_latest) else "n/a")
-#colk3.metric("Companies (unique)", f"{unique_companies:,}")
-# (Optional) show per-year actives to sanity-check
-per_year = d.dropna(subset=["year"]).groupby("year")["company_key"].nunique()
-st.caption("Active companies per year: " + ", ".join(f"{int(y)}: {n}" for y, n in per_year.items()))
+colk1, colk2 = st.columns(2)
+
+# totals
+total_sum = float(d["amount"].sum()) if "amount" in d else 0.0
+
+# date range (robust to NaT/missing)
+dates = pd.to_datetime(d["transaction_date"], errors="coerce") if "transaction_date" in d else pd.Series([], dtype="datetime64[ns]")
+date_min = dates.min()
+date_max = dates.max()
+date_range = f"{date_min:%Y-%m} to {date_max:%Y-%m}" if pd.notna(date_min) and pd.notna(date_max) else "n/a"
+
+# uniques (optional)
+unique_companies = d["company_key"].nunique() if "company_key" in d else 0
+
+colk1.metric("Total", f"₱{total_sum:,.0f}")
+colk2.metric("Date Range", date_range)
 
 st.divider()
 
-# ---------- Active companies per year (bar) ----------
-st.subheader("Active Companies per Year")
+# ---------- Row 1: Active Companies per Year & Yearly Total Sales side by side ----------
+st.subheader("Active Companies & Yearly Total Sales")
 
 # prefer canonical key; fall back to raw name if not present
 key_col = "company_key" if "company_key" in d.columns else "company"
 
 ac = (d.dropna(subset=["year", key_col])
-        .drop_duplicates(subset=["year", key_col])       # one row per (year, company)
+        .drop_duplicates(subset=["year", key_col])  # one row per (year, company)
         .groupby("year")[key_col].size()
         .reset_index(name="active_companies")
         .sort_values("year"))
 
+# Build monthly_ts for yearly totals
+monthly_ts = d.groupby("month_key", dropna=False)["amount"].sum().rename("monthly_total").reset_index()
+monthly_ts["month_dt"] = pd.to_datetime(monthly_ts["month_key"], format="%Y-%m", errors="coerce")
+monthly_ts = monthly_ts.dropna().sort_values("month_dt").reset_index(drop=True)
+
+# Make yearly totals with CAGR
+tmp = monthly_ts.copy()
+tmp["year"] = tmp["month_dt"].dt.year
+year_tot = tmp.groupby("year")["monthly_total"].sum().rename("year_total").reset_index()
+
+# CAGR
+if not year_tot.empty:
+    first_val = float(year_tot["year_total"].iloc[0])
+    last_val = float(year_tot["year_total"].iloc[-1])
+    n_years = int(year_tot["year"].iloc[-1] - year_tot["year"].iloc[0])
+    cagr = (last_val / first_val) ** (1.0 / n_years) - 1.0 if (n_years > 0 and first_val > 0) else None
+else:
+    cagr = None
+
+# Linear trend for yearly totals
+if len(year_tot) >= 2:
+    import numpy as np
+    m, b = np.polyfit(year_tot["year"], year_tot["year_total"], 1)
+    xfit = np.linspace(year_tot["year"].min()-0.2, year_tot["year"].max()+0.2, 100)
+    yfit = m*xfit + b
+else:
+    m = None
+    xfit = yfit = None
+
+# Two columns side by side
+c1, c2 = st.columns(2)
+
+# --- Left chart: Active Companies per Year ---
 if ac.empty:
-    st.info("No data available for the selected filters.")
+    c1.info("No data available for Active Companies.")
 else:
     fig_ac = px.bar(
         ac, x="year", y="active_companies",
@@ -229,64 +342,125 @@ else:
         text="active_companies"
     )
     fig_ac.update_traces(textposition="outside")
-    # add a little headroom so labels don't clip
     ymax = ac["active_companies"].max()
     fig_ac.update_yaxes(range=[0, ymax * 1.15])
-    st.plotly_chart(fig_ac, use_container_width=True)
+    c1.plotly_chart(fig_ac, use_container_width=True)
 
-# ---------- Row 1: Monthly totals & Top-N ----------
-c1, c2 = st.columns(2)
+# --- Right chart: Yearly Total Sales with trend ---
+if year_tot.empty:
+    c2.info("Not enough data to compute yearly totals for the current filters.")
+else:
+    # Bar for yearly totals
+    fig_year = px.bar(
+        year_tot, x="year", y="year_total",
+        text="year_total",
+        title=("Yearly Total Sales" +
+               (f" • Compound Annual Growth Rate {cagr*100:,.1f}%" if cagr else ""))
+    )
+    fig_year.update_traces(texttemplate="₱%{text:,.0f}", textposition="outside")
+    fig_year.update_yaxes(tickprefix="₱", separatethousands=True)
+
+    # Add trend line
+    if xfit is not None:
+        fig_year.add_scatter(
+            x=xfit, y=yfit, mode="lines", name=f"Trend (₱{m:,.0f}/yr)",
+            line=dict(color="#f39c12", width=3)
+        )
+
+    c2.plotly_chart(fig_year, use_container_width=True)
+
+st.divider()
+
+# ---------- Row 2: Run-rate gauge (full width) ----------
+st.subheader("Run-rate Gauge")
+
+if d["transaction_date"].notna().any():
+    last_dt = d["transaction_date"].max()
+    yr, mo = int(last_dt.year), int(last_dt.month)
+    cur_ytd  = d[(d["transaction_date"].dt.year == yr) & (d["transaction_date"].dt.month <= mo)]["amount"].sum()
+    prev_ytd = d[(d["transaction_date"].dt.year == yr - 1) & (d["transaction_date"].dt.month <= mo)]["amount"].sum()
+    proj = cur_ytd * (12.0 / mo) if mo > 0 else np.nan
+    gauge = pd.DataFrame({"metric": ["Prev YTD", "Current YTD", "Projection"],
+                          "value": [prev_ytd, cur_ytd, proj]})
+    
+    color_map = {
+    "Prev YTD": "#c6dbef",        
+    "Current YTD": "#6baed6",     
+    "Projection": "#2171b5"      
+    }
+    
+    fig_g = px.bar(
+        gauge,
+        x="value", y="metric", orientation="h",
+        color="metric",
+        title="Run-rate Gauge",
+        color_discrete_map=color_map
+    )
+    fig_g.update_layout(showlegend=False)
+    fig_g.update_xaxes(tickprefix="₱", separatethousands=True)
+    st.plotly_chart(fig_g, use_container_width=True)
+
+st.divider()
+
+# ---------- Row 3: Monthly Total Sales (full width) ----------
+st.subheader("Monthly Total Sales")
 
 # Monthly totals
 ts = d.groupby("month_key", dropna=False)["amount"].sum().rename("monthly_total").reset_index()
 ts["month_dt"] = pd.to_datetime(ts["month_key"], format="%Y-%m", errors="coerce")
-ts = ts.dropna().sort_values("month_dt")
-fig_ts = px.line(ts, x="month_dt", y="monthly_total", markers=True, title="Monthly Total Sales")
+ts = ts.dropna().sort_values("month_dt").reset_index(drop=True)
+# 3-mo centered rolling mean (robust to short series)
+ts["trend_3mo"] = ts["monthly_total"].rolling(window=3, center=True, min_periods=1).mean()
+
+fig_ts = px.line(
+    ts, x="month_dt", y="monthly_total", markers=True,
+    title="Monthly Total Sales"
+)
+fig_ts.update_traces(name="Monthly", hovertemplate="%{x|%b %Y}<br>₱%{y:,.0f}<extra></extra>")
 fig_ts.update_yaxes(tickprefix="₱", separatethousands=True)
-c1.plotly_chart(fig_ts, use_container_width=True)
+# Add orange trend line
+fig_ts.add_scatter(
+    x=ts["month_dt"], y=ts["trend_3mo"], mode="lines",
+    name="3-mo Trend", line=dict(width=3, color="#f39c12")
+)
+st.plotly_chart(fig_ts, use_container_width=True)
+
+# ---------- Row 4: Top Companies & Share of Total Sales ----------
+st.subheader("Top Companies & Share of Total Sales")
 
 # Top-N companies (current filter)
 ytd = d.groupby("company", dropna=False)["amount"].sum().reset_index()
 ytd = ytd.sort_values("amount", ascending=False)
-fig_top = px.bar(ytd.head(top_n)[::-1], x="amount", y="company", orientation="h",
-                 title=f"Top {top_n} Companies (current filter)")
+
+# side-by-side
+c1, c2 = st.columns(2)
+
+# Left: Top 10 Companies (bar)
+fig_top = px.bar(
+    ytd.head(top_n)[::-1], x="amount", y="company", orientation="h",
+    title=f"Top {top_n} Companies"
+)
 fig_top.update_xaxes(tickprefix="₱", separatethousands=True)
-c2.plotly_chart(fig_top, use_container_width=True)
+c1.plotly_chart(fig_top, use_container_width=True)
 
-# ---------- Row 2: Share pie & Run-rate ----------
-c3, c4 = st.columns(2)
-
-# Share pie (Top-10 + Others) with truncated labels
+# Right: Share pie (Top-10 + Others)
 pie_topn = 10
 pie = ytd.copy()
 others = pie["amount"][pie_topn:].sum()
 pie = pie.head(pie_topn)
 if others > 0:
-    pie = pd.concat([pie, pd.DataFrame({"company":["Others"], "amount":[others]})], ignore_index=True)
-pie["label"] = pie["company"].str.slice(0, PIE_LABEL_MAX) + np.where(pie["company"].str.len()>PIE_LABEL_MAX, "…", "")
+    pie = pd.concat([pie, pd.DataFrame({"company": ["Others"], "amount": [others]})], ignore_index=True)
+pie["label"] = pie["company"].str.slice(0, PIE_LABEL_MAX) + np.where(
+    pie["company"].str.len() > PIE_LABEL_MAX, "…", ""
+)
 fig_pie = px.pie(
     pie, names="label", values="amount",
     title=f"Share of Total Sales (Top-{pie_topn} + Others)",
     color_discrete_sequence=COLOR_SEQ
 )
-c3.plotly_chart(fig_pie, use_container_width=True)
+c2.plotly_chart(fig_pie, use_container_width=True)
 
-# Run-rate gauge: prev YTD vs current YTD vs projection
-if d["transaction_date"].notna().any():
-    last_dt = d["transaction_date"].max()
-    yr, mo = int(last_dt.year), int(last_dt.month)
-    cur_ytd  = d[(d["transaction_date"].dt.year==yr) & (d["transaction_date"].dt.month<=mo)]["amount"].sum()
-    prev_ytd = d[(d["transaction_date"].dt.year==yr-1) & (d["transaction_date"].dt.month<=mo)]["amount"].sum()
-    proj = cur_ytd * (12.0/mo) if mo>0 else np.nan
-    gauge = pd.DataFrame({"metric":["Prev YTD","Current YTD","Projection"], "value":[prev_ytd,cur_ytd,proj]})
-    fig_g = px.bar(gauge, x="value", y="metric", orientation="h",
-                   title=f"Run-rate gauge • YTD to {yr}-{mo:02d}")
-    fig_g.update_xaxes(tickprefix="₱", separatethousands=True)
-    c4.plotly_chart(fig_g, use_container_width=True)
-
-st.divider()
-
-# ---------- Row 3: Invoice-type mix (monthly/yearly + normalized) ----------
+# ---------- Row 5: Invoice-type mix (monthly/yearly + normalized) ----------
 if "receipt_type" in d.columns and d["receipt_type"].notna().any():
     # Monthly stacked
     m = d.groupby(["month_key","receipt_type"])["amount"].sum().reset_index()
@@ -307,7 +481,6 @@ if "receipt_type" in d.columns and d["receipt_type"].notna().any():
         color_discrete_sequence=COLOR_SEQ
     )
     fig_mix_y.update_yaxes(tickprefix="₱", separatethousands=True)
-    st.plotly_chart(fig_mix_y, use_container_width=True)
 
     # Yearly normalized (100%) with % annotations
     y_norm = y.pivot(index="year", columns="receipt_type", values="amount").fillna(0.0)
@@ -320,32 +493,36 @@ if "receipt_type" in d.columns and d["receipt_type"].notna().any():
     )
     fig_norm.update_traces(texttemplate="%{text:.1f}%", textposition="inside")
     fig_norm.update_yaxes(range=[0,100], ticksuffix="%")
-    st.plotly_chart(fig_norm, use_container_width=True)
+
+    # --- Side-by-side columns for yearly stacked & normalized ---
+    c1, c2 = st.columns(2)
+    c1.plotly_chart(fig_mix_y, use_container_width=True)
+    c2.plotly_chart(fig_norm, use_container_width=True)
 
 st.divider()
 
-# ---------- STL decomposition (computed on the fly for current filter) ----------
-with st.expander("STL Decomposition (monthly totals)", expanded=False):
-    ts2 = d.groupby("month_key")["amount"].sum().reset_index()
-    ts2["month_dt"] = pd.to_datetime(ts2["month_key"], format="%Y-%m", errors="coerce")
-    ts2 = ts2.dropna().sort_values("month_dt")
-    if not ts2.empty:
-        s = ts2.set_index("month_dt")["amount"].copy()
-        s.index = s.index.to_period("M").to_timestamp("M")
-        full_idx = pd.period_range(s.index.min().to_period("M"), s.index.max().to_period("M"), freq="M").to_timestamp("M")
-        s = s.reindex(full_idx).fillna(0.0)
-        res = STL(s, period=12, robust=True).fit()
-        comp = pd.DataFrame({
-            "date": s.index,
-            "Observed": s.values,
-            "Trend": res.trend,
-            "Seasonal": res.seasonal,
-            "Residual": res.resid
-        })
-        st.line_chart(comp.set_index("date")[["Observed"]])
-        st.line_chart(comp.set_index("date")[["Trend"]])
-        #st.line_chart(comp.set_index("date")[["Seasonal"]])
-        #st.line_chart(comp.set_index("date")[["Residual"]])
-    else:
-        st.info("Not enough monthly data after filters.")
 
+# # ---------- Row 6: STL decomposition (computed on the fly for current filter) ----------
+# with st.expander("STL Decomposition (monthly totals)", expanded=False):
+#     ts2 = d.groupby("month_key")["amount"].sum().reset_index()
+#     ts2["month_dt"] = pd.to_datetime(ts2["month_key"], format="%Y-%m", errors="coerce")
+#     ts2 = ts2.dropna().sort_values("month_dt")
+#     if not ts2.empty:
+#         s = ts2.set_index("month_dt")["amount"].copy()
+#         s.index = s.index.to_period("M").to_timestamp("M")
+#         full_idx = pd.period_range(s.index.min().to_period("M"), s.index.max().to_period("M"), freq="M").to_timestamp("M")
+#         s = s.reindex(full_idx).fillna(0.0)
+#         res = STL(s, period=12, robust=True).fit()
+#         comp = pd.DataFrame({
+#             "date": s.index,
+#             "Observed": s.values,
+#             "Trend": res.trend,
+#             "Seasonal": res.seasonal,
+#             "Residual": res.resid
+#         })
+#         #st.line_chart(comp.set_index("date")[["Observed"]])
+#         st.line_chart(comp.set_index("date")[["Trend"]])
+#         #st.line_chart(comp.set_index("date")[["Seasonal"]])
+#         #st.line_chart(comp.set_index("date")[["Residual"]])
+#     else:
+#         st.info("Not enough monthly data after filters.")
