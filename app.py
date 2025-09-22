@@ -14,6 +14,9 @@ import requests
 import io
 from requests.exceptions import HTTPError, Timeout, RequestException
 import plotly.io as pio
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
+
 
 # Must be the first Streamlit command:
 st.set_page_config(page_title="FKTS Sales Monitor", layout="wide")
@@ -129,8 +132,8 @@ def _company_key(s: str):
     return ALIASES.get(s, s) if s else np.nan
 
 # Peso formatter for Matplotlib axes
-def _peso_fmt(x, pos):
-    return "₱{:,.2f}".format(x)
+def _peso_fmt(x, pos=None):
+    return f"₱{x:,.0f}"
 
 def plot_yearly_tendency_stream(monthly_ts):
     """
@@ -143,9 +146,9 @@ def plot_yearly_tendency_stream(monthly_ts):
     tmp = monthly_ts.copy()
     tmp["year"] = tmp["month_dt"].dt.year
 
+    # yearly totals + completeness
     year_tot = (tmp.groupby("year", as_index=False)["monthly_total"]
                   .sum().rename(columns={"monthly_total": "year_total"}))
-    # completeness
     counts = tmp.groupby("year")["month_dt"].nunique().rename("n_months")
     year_tot = year_tot.merge(counts, on="year", how="left").sort_values("year")
     if year_tot.empty:
@@ -168,7 +171,7 @@ def plot_yearly_tendency_stream(monthly_ts):
         xfit = np.linspace(years.min()-0.2, years.max()+0.2, 100)
         yfit = m * xfit + b
 
-    # Plot
+    # Plot (Matplotlib)
     fig, ax = plt.subplots(figsize=(12, 6))
     bars = ax.bar(years, totals, width=0.6, color="#1f77b4")
     ax.yaxis.set_major_formatter(FuncFormatter(_peso_fmt))
@@ -349,6 +352,13 @@ ac = (d.dropna(subset=["year", key_col])
 monthly_ts = d.groupby("month_key", dropna=False)["amount"].sum().rename("monthly_total").reset_index()
 monthly_ts["month_dt"] = pd.to_datetime(monthly_ts["month_key"], format="%Y-%m", errors="coerce")
 monthly_ts = monthly_ts.dropna().sort_values("month_dt").reset_index(drop=True)
+
+fig_year, year_df, cagr, slope = plot_yearly_tendency_stream(monthly_ts)
+
+if fig_year is None or year_df.empty:
+    st.info("Not enough data to compute yearly totals.")
+else:
+    st.pyplot(fig_year, clear_figure=True)
 
 # Make yearly totals with CAGR
 tmp = monthly_ts.copy()
