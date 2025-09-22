@@ -396,30 +396,22 @@ else:
 if year_tot.empty:
     c2.info("Not enough data to compute yearly totals for the current filters.")
 else:
-    if show_mpl_yearly:
-        # Render your Matplotlib version INSIDE the right column
-        fig_mpl, year_df, cagr_mpl, slope_mpl = plot_yearly_tendency_stream(monthly_ts)
-        if fig_mpl is None or year_df.empty:
-            c2.info("Not enough data to compute yearly totals.")
-        else:
-            c2.pyplot(fig_mpl, clear_figure=True)
-    else:
-        # Plotly version with trend line
-        fig_year = px.bar(
-            year_tot, x="year", y="year_total",
-            text="year_total",
-            title=("Yearly Total Sales" +
-                   (f" • CAGR {cagr*100:,.1f}%" if cagr else ""))
-        )
-        fig_year.update_traces(texttemplate="₱%{text:,.0f}", textposition="outside")
-        fig_year.update_yaxes(tickprefix="₱", separatethousands=True)
+    # Plotly version with trend line
+    fig_year = px.bar(
+        year_tot, x="year", y="year_total",
+        text="year_total",
+        title=("Yearly Total Sales" +
+               (f" • CAGR {cagr*100:,.1f}%" if cagr else ""))
+    )
+    fig_year.update_traces(texttemplate="₱%{text:,.0f}", textposition="outside")
+    fig_year.update_yaxes(tickprefix="₱", separatethousands=True)
 
-        if xfit is not None:
-            fig_year.add_scatter(
-                x=xfit, y=yfit, mode="lines", name=f"Trend (₱{m:,.0f}/yr)",
-                line=dict(color="#f39c12", width=3)
-            )
-        c2.plotly_chart(fig_year, use_container_width=True)
+    if xfit is not None:
+        fig_year.add_scatter(
+            x=xfit, y=yfit, mode="lines", name=f"Trend (₱{m:,.0f}/yr)",
+            line=dict(color="#f39c12", width=3)
+        )
+    c2.plotly_chart(fig_year, use_container_width=True)
 
 st.divider()
 
