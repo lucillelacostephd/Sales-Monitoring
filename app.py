@@ -348,33 +348,25 @@ ac = (d.dropna(subset=["year", key_col])
         .reset_index(name="active_companies")
         .sort_values("year"))
 
-# Build monthly_ts for yearly totals
+# Build monthly_ts for yearly totals (once)
 monthly_ts = d.groupby("month_key", dropna=False)["amount"].sum().rename("monthly_total").reset_index()
 monthly_ts["month_dt"] = pd.to_datetime(monthly_ts["month_key"], format="%Y-%m", errors="coerce")
 monthly_ts = monthly_ts.dropna().sort_values("month_dt").reset_index(drop=True)
 
-fig_year, year_df, cagr, slope = plot_yearly_tendency_stream(monthly_ts)
-
-if fig_year is None or year_df.empty:
-    st.info("Not enough data to compute yearly totals.")
-else:
-    st.pyplot(fig_year, clear_figure=True)
-
-# Make yearly totals with CAGR
+# Precompute yearly totals
 tmp = monthly_ts.copy()
 tmp["year"] = tmp["month_dt"].dt.year
 year_tot = tmp.groupby("year")["monthly_total"].sum().rename("year_total").reset_index()
 
-# CAGR
+# CAGR and trend line
 if not year_tot.empty:
     first_val = float(year_tot["year_total"].iloc[0])
-    last_val = float(year_tot["year_total"].iloc[-1])
-    n_years = int(year_tot["year"].iloc[-1] - year_tot["year"].iloc[0])
+    last_val  = float(year_tot["year_total"].iloc[-1])
+    n_years   = int(year_tot["year"].iloc[-1] - year_tot["year"].iloc[0])
     cagr = (last_val / first_val) ** (1.0 / n_years) - 1.0 if (n_years > 0 and first_val > 0) else None
 else:
     cagr = None
 
-# Linear trend for yearly totals
 if len(year_tot) >= 2:
     m, b = np.polyfit(year_tot["year"], year_tot["year_total"], 1)
     xfit = np.linspace(year_tot["year"].min()-0.2, year_tot["year"].max()+0.2, 100)
@@ -382,6 +374,10 @@ if len(year_tot) >= 2:
 else:
     m = None
     xfit = yfit = None
+
+# Optional toggle for Matplotlib version in the sidebar
+with st.sidebar:
+    show_mpl_yearly = st.checkbox("Show Matplotlib yearly chart", value=False)
 
 # Two columns side by side
 c1, c2 = st.columns(2)
@@ -404,26 +400,33 @@ else:
 if year_tot.empty:
     c2.info("Not enough data to compute yearly totals for the current filters.")
 else:
-    # Bar for yearly totals
-    fig_year = px.bar(
-        year_tot, x="year", y="year_total",
-        text="year_total",
-        title=("Yearly Total Sales" +
-               (f" • Compound Annual Growth Rate {cagr*100:,.1f}%" if cagr else ""))
-    )
-    fig_year.update_traces(texttemplate="₱%{text:,.0f}", textposition="outside")
-    fig_year.update_yaxes(tickprefix="₱", separatethousands=True)
-
-    # Add trend line
-    if xfit is not None:
-        fig_year.add_scatter(
-            x=xfit, y=yfit, mode="lines", name=f"Trend (₱{m:,.0f}/yr)",
-            line=dict(color="#f39c12", width=3)
+    if show_mpl_yearly:
+        # Render your Matplotlib version INSIDE the right column
+        fig_mpl, year_df, cagr_mpl, slope_mpl = plot_yearly_tendency_stream(monthly_ts)
+        if fig_mpl is None or year_df.empty:
+            c2.info("Not enough data to compute yearly totals.")
+        else:
+            c2.pyplot(fig_mpl, clear_figure=True)
+    else:
+        # Plotly version with trend line
+        fig_year = px.bar(
+            year_tot, x="year", y="year_total",
+            text="year_total",
+            title=("Yearly Total Sales" +
+                   (f" • CAGR {cagr*100:,.1f}%" if cagr else ""))
         )
+        fig_year.update_traces(texttemplate="₱%{text:,.0f}", textposition="outside")
+        fig_year.update_yaxes(tickprefix="₱", separatethousands=True)
 
-    c2.plotly_chart(fig_year, use_container_width=True)
+        if xfit is not None:
+            fig_year.add_scatter(
+                x=xfit, y=yfit, mode="lines", name=f"Trend (₱{m:,.0f}/yr)",
+                line=dict(color="#f39c12", width=3)
+            )
+        c2.plotly_chart(fig_year, use_container_width=True)
 
 st.divider()
+
 
 # ---------- Row 2: Run-rate gauge (full width) ----------
 st.subheader("Run-rate Gauge")
