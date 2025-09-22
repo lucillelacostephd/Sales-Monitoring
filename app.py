@@ -516,7 +516,6 @@ c2.plotly_chart(fig_pie, use_container_width=True)
 
 # ---------- Row 5: Invoice-type mix (monthly/yearly + normalized) ----------
 if "receipt_type" in d.columns and d["receipt_type"].notna().any():
-    # Drop NaNs in receipt_type
     d_receipts = d[d["receipt_type"].notna()].copy()
 
     # Monthly stacked
@@ -526,9 +525,9 @@ if "receipt_type" in d.columns and d["receipt_type"].notna().any():
     fig_mix_m = px.bar(
         m, x="month_dt", y="amount", color="receipt_type",
         title="Invoice-Type Mix by Month",
-        color_discrete_sequence=COLOR_SEQ,
-        barmode="stack"   # enforce at creation time
+        color_discrete_sequence=COLOR_SEQ
     )
+    fig_mix_m.update_layout(barmode="stack")  # enforce stacking
     fig_mix_m.update_yaxes(tickprefix="₱", separatethousands=True)
     st.plotly_chart(fig_mix_m, use_container_width=True)
 
@@ -538,12 +537,12 @@ if "receipt_type" in d.columns and d["receipt_type"].notna().any():
     fig_mix_y = px.bar(
         y, x="year", y="amount", color="receipt_type",
         title="Invoice-Type Mix by Year",
-        color_discrete_sequence=COLOR_SEQ,
-        barmode="stack"   # enforce at creation time
+        color_discrete_sequence=COLOR_SEQ
     )
+    fig_mix_y.update_layout(barmode="stack")  # enforce stacking
     fig_mix_y.update_yaxes(tickprefix="₱", separatethousands=True)
 
-    # Yearly normalized (100%) with % annotations
+    # Yearly normalized (100%)
     y_norm = y.pivot(index="year", columns="receipt_type", values="amount").fillna(0.0)
     y_share = y_norm.div(y_norm.sum(axis=1).replace(0, np.nan), axis=0).fillna(0.0) * 100.0
     y_share_m = y_share.reset_index().melt(id_vars="year", var_name="receipt_type", value_name="pct")
@@ -551,16 +550,16 @@ if "receipt_type" in d.columns and d["receipt_type"].notna().any():
     fig_norm = px.bar(
         y_share_m, x="year", y="pct", color="receipt_type",
         title="Invoice-Type Mix by Year (Normalized)",
-        text="pct", color_discrete_sequence=COLOR_SEQ,
-        barmode="stack"   # enforce at creation time
+        text="pct", color_discrete_sequence=COLOR_SEQ
     )
+    fig_norm.update_layout(barmode="stack")  # enforce stacking
     fig_norm.update_traces(texttemplate="%{text:.1f}%", textposition="inside")
     fig_norm.update_yaxes(range=[0, 100], ticksuffix="%")
 
-    # Display side by side
     c1, c2 = st.columns(2)
     c1.plotly_chart(fig_mix_y, use_container_width=True)
     c2.plotly_chart(fig_norm, use_container_width=True)
 
 st.divider()
+
 
