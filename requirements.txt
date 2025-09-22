@@ -1,8 +1,8 @@
+# requirements.txt
 streamlit==1.49.1
 pandas==2.2.3
 numpy==1.26.4
 plotly==5.22.0
 requests==2.32.3
-matplotlib==3.7.2
-
-
+openpyxl==3.1.5
+matplotlib==3.7.2    # you’re using the yearly tendency Matplotlib plot
