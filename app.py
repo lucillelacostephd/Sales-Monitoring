@@ -375,10 +375,6 @@ else:
     m = None
     xfit = yfit = None
 
-# Optional toggle for Matplotlib version in the sidebar
-with st.sidebar:
-    show_mpl_yearly = st.checkbox("Show Matplotlib yearly chart", value=False)
-
 # Two columns side by side
 c1, c2 = st.columns(2)
 
@@ -427,7 +423,6 @@ else:
 
 st.divider()
 
-
 # ---------- Row 2: Run-rate gauge (full width) ----------
 st.subheader("Run-rate Gauge")
 
@@ -465,7 +460,6 @@ if d["transaction_date"].notna().any():
     st.plotly_chart(fig_g, use_container_width=True)
 
 st.divider()
-
 
 # ---------- Row 3: Monthly Total Sales (full width) ----------
 st.subheader("Monthly Total Sales")
