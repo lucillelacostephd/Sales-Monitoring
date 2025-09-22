@@ -557,12 +557,22 @@ if "receipt_type" in d.columns and d["receipt_type"].notna().any():
         template="plotly_white"
     )
 
-    # ---------- Yearly normalized ----------
+# ---------- Yearly normalized ----------
     y_share = y_wide.div(y_wide.sum(axis=1).replace(0,np.nan), axis=0).fillna(0.0) * 100.0
     fig_norm = go.Figure()
     for col in y_share.columns:
-        fig_norm.add_bar(name=col, x=y_share.index.astype(str), y=y_share[col], text=y_share[col])
-    fig_norm.update_traces(texttemplate="%{text:.1f}%", textposition="inside")
+        fig_norm.add_bar(
+            name=col,
+            x=y_share.index.astype(str),
+            y=y_share[col],
+            text=y_share[col],  # values for texttemplate
+        )
+    # Use HTML bold inside texttemplate
+    fig_norm.update_traces(
+        texttemplate="<b>%{text:.1f}%</b>",  # <-- bold text
+        textposition="inside",
+        insidetextanchor="middle"
+    )
     fig_norm.update_layout(
         barmode="stack",
         title="Invoice-Type Mix by Year (Normalized)",
@@ -572,7 +582,7 @@ if "receipt_type" in d.columns and d["receipt_type"].notna().any():
         yaxis_ticksuffix="%",
         template="plotly_white"
     )
-
+    
     c1, c2 = st.columns(2)
     c1.plotly_chart(fig_mix_y, use_container_width=True)
     c2.plotly_chart(fig_norm, use_container_width=True)
