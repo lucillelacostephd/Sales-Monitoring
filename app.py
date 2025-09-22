@@ -516,44 +516,51 @@ c2.plotly_chart(fig_pie, use_container_width=True)
 
 # ---------- Row 5: Invoice-type mix (monthly/yearly + normalized) ----------
 if "receipt_type" in d.columns and d["receipt_type"].notna().any():
+    # Drop NaNs in receipt_type
+    d_receipts = d[d["receipt_type"].notna()].copy()
+
     # Monthly stacked
-    m = d.groupby(["month_key","receipt_type"])["amount"].sum().reset_index()
+    m = d_receipts.groupby(["month_key","receipt_type"], as_index=False)["amount"].sum()
     m["month_dt"] = pd.to_datetime(m["month_key"])
+    m = m.sort_values(["month_dt","receipt_type"])
     fig_mix_m = px.bar(
-        m.sort_values("month_dt"),
-        x="month_dt", y="amount", color="receipt_type",
+        m, x="month_dt", y="amount", color="receipt_type",
         title="Invoice-Type Mix by Month",
-        color_discrete_sequence=COLOR_SEQ
+        color_discrete_sequence=COLOR_SEQ,
+        barmode="stack"   # enforce at creation time
     )
-    fig_mix_m.update_layout(barmode="stack")  # <— enforce
     fig_mix_m.update_yaxes(tickprefix="₱", separatethousands=True)
     st.plotly_chart(fig_mix_m, use_container_width=True)
-    
+
     # Yearly stacked (absolute)
-    y = d.groupby(["year","receipt_type"])["amount"].sum().reset_index()
+    y = d_receipts.groupby(["year","receipt_type"], as_index=False)["amount"].sum()
+    y = y.sort_values(["year","receipt_type"])
     fig_mix_y = px.bar(
         y, x="year", y="amount", color="receipt_type",
         title="Invoice-Type Mix by Year",
-        color_discrete_sequence=COLOR_SEQ
+        color_discrete_sequence=COLOR_SEQ,
+        barmode="stack"   # enforce at creation time
     )
-    fig_mix_y.update_layout(barmode="stack")  # <— enforce
     fig_mix_y.update_yaxes(tickprefix="₱", separatethousands=True)
-    
-    # Yearly normalized (100%) with % annotations (keep your manual calc)
+
+    # Yearly normalized (100%) with % annotations
     y_norm = y.pivot(index="year", columns="receipt_type", values="amount").fillna(0.0)
-    y_share = (y_norm.div(y_norm.sum(axis=1).replace(0, np.nan), axis=0).fillna(0.0) * 100.0)
+    y_share = y_norm.div(y_norm.sum(axis=1).replace(0, np.nan), axis=0).fillna(0.0) * 100.0
     y_share_m = y_share.reset_index().melt(id_vars="year", var_name="receipt_type", value_name="pct")
+    y_share_m = y_share_m.sort_values(["year","receipt_type"])
     fig_norm = px.bar(
         y_share_m, x="year", y="pct", color="receipt_type",
         title="Invoice-Type Mix by Year (Normalized)",
-        text="pct", color_discrete_sequence=COLOR_SEQ
+        text="pct", color_discrete_sequence=COLOR_SEQ,
+        barmode="stack"   # enforce at creation time
     )
-    fig_norm.update_layout(barmode="stack")  # <— enforce
     fig_norm.update_traces(texttemplate="%{text:.1f}%", textposition="inside")
     fig_norm.update_yaxes(range=[0, 100], ticksuffix="%")
-    
+
+    # Display side by side
     c1, c2 = st.columns(2)
     c1.plotly_chart(fig_mix_y, use_container_width=True)
     c2.plotly_chart(fig_norm, use_container_width=True)
 
 st.divider()
+
