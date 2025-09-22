@@ -1,0 +1,17 @@
+[theme]
+base="light"
+
+[server]
+headless=true
+
+[browser]
+gatherUsageStats=false
+
+[client]
+toolbarMode="viewer"
+
+[ui]
+hideTopBar=false
+
+# Streamlit uses this setting in Python, but the modern way is:
+# st.set_page_config(layout="wide")
