@@ -1,11 +1,11 @@
 # Sales Monitoring
 
-An interactive Streamlit web app for monitoring and analyzing FKTS sales, invoices, and client trends across multiple years.
+An interactive Streamlit web app for monitoring and analyzing COMPANY sales, invoices, and client trends across multiple years.
 
 ## Overview
 
 This app consolidates payment monitoring workbooks (2019–present) into a single interactive dashboard.
-It was designed to help FKTS staff and management:
+It was designed to help company staff and management:
 
 Track total sales and monthly trends across years.
 
