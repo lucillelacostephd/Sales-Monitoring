@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Created on Fri Sep 19 12:16:23 2025
-FKTS Sales Monitor (Streamlit) — Python >= 3.9
+Sales Monitor (Streamlit) — Python >= 3.9
 """
 
 import re
@@ -19,7 +19,7 @@ from matplotlib.ticker import FuncFormatter
 
 
 # Must be the first Streamlit command:
-st.set_page_config(page_title="FKTS Sales Monitor", layout="wide")
+st.set_page_config(page_title="Sales Monitor", layout="wide")
 pio.templates.default = "plotly_white"
 px.defaults.template = "plotly_white"
 # color sequence used across charts
