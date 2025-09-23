@@ -292,7 +292,7 @@ def load_both_drive_files(file_ids: dict, data_version: str = "v1") -> pd.DataFr
 df = load_both_drive_files(FILES)
 
 # ---------- UI ----------
-st.title("FKTS Sales Monitor")
+st.title("Sales Monitor")
 
 if df.empty:
     st.error("No data loaded. Check Google Drive sharing (Anyone with link: Viewer) and file format.")
